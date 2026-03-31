@@ -1,0 +1,5 @@
+{
+  "name": "Building Explorer",
+  "description": "A map-based building explorer using OpenLayers and Nominatim for location search.",
+  "requestFramePermissions": ["geolocation"]
+}
