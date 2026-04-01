@@ -8,6 +8,9 @@ import Sidebar from './components/Sidebar';
 import MapComponent from './components/Map';
 import Toolbar from './components/Toolbar';
 import RadiusDialog from './components/RadiusDialog';
+import { motion, AnimatePresence } from 'motion/react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { cn } from './lib/utils';
 
 export interface CircleLayer {
   id: string;
@@ -40,6 +43,7 @@ export default function App() {
   const [circleLayers, setCircleLayers] = useState<CircleLayer[]>([]);
   const [buildingFootprints, setBuildingFootprints] = useState<BuildingFootprint[]>([]);
   const [isFetchingBuildings, setIsFetchingBuildings] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const handleLocationSelect = (lat: number, lon: number) => {
     setMapState({
@@ -84,12 +88,16 @@ export default function App() {
   const fetchBuildingFootprints = async (lat: number, lon: number, radius: number) => {
     setIsFetchingBuildings(true);
     try {
-      // Overpass API query for buildings within a radius
+      // Overpass API query for buildings and schools within a radius
       const query = `
         [out:json];
         (
           way["building"](around:${radius},${lat},${lon});
           relation["building"](around:${radius},${lat},${lon});
+          way["amenity"="school"](around:${radius},${lat},${lon});
+          relation["amenity"="school"](around:${radius},${lat},${lon});
+          way["school"](around:${radius},${lat},${lon});
+          relation["school"](around:${radius},${lat},${lon});
         );
         out geom;
       `;
@@ -137,11 +145,41 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gray-50 font-sans" id="app-root">
-      <Sidebar 
-        onLocationSelect={handleLocationSelect} 
-        pickedLocation={pickedLocation}
-        isPicking={isPicking}
-      />
+      {/* Sidebar Container with Animation */}
+      <motion.div
+        initial={false}
+        animate={{ 
+          width: isSidebarCollapsed ? 0 : 320,
+          opacity: isSidebarCollapsed ? 0 : 1
+        }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        className="relative flex-shrink-0 h-full overflow-hidden"
+      >
+        <Sidebar 
+          onLocationSelect={handleLocationSelect} 
+          pickedLocation={pickedLocation}
+          isPicking={isPicking}
+        />
+      </motion.div>
+
+      {/* Collapse Toggle Button */}
+      <div className="relative z-40 flex items-center">
+        <button
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          className={cn(
+            "absolute -left-3 w-6 h-12 bg-white border border-gray-200 rounded-full shadow-md flex items-center justify-center hover:bg-gray-50 transition-colors group",
+            isSidebarCollapsed && "left-2"
+          )}
+          title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+        >
+          {isSidebarCollapsed ? (
+            <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-500" />
+          ) : (
+            <ChevronLeft className="w-4 h-4 text-gray-400 group-hover:text-blue-500" />
+          )}
+        </button>
+      </div>
+
       <main className="flex-1 relative">
         <Toolbar 
           isPicking={isPickingCircleLocation} 
