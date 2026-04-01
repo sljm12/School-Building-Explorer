@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, MapPin, Loader2, GripHorizontal, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
+import { Search, MapPin, Loader2, GripHorizontal, Maximize2, Minimize2, RefreshCw, MessageSquare, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface Location {
@@ -21,6 +21,8 @@ const Sidebar: React.FC<SidebarProps> = ({ onLocationSelect, pickedLocation, isP
   const [results, setResults] = useState<Location[]>([]);
   const [loading, setLoading] = useState(false);
   const [topHeight, setTopHeight] = useState(50); // Percentage
+  const [aiResponse, setAiResponse] = useState<string | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
 
@@ -39,6 +41,33 @@ const Sidebar: React.FC<SidebarProps> = ({ onLocationSelect, pickedLocation, isP
       console.error('Search error:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAskAi = async () => {
+    if (!pickedLocation) return;
+    setIsAiLoading(true);
+    setAiResponse(null);
+    try {
+      const response = await fetch('/api/openai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { role: 'system', content: 'You are a helpful assistant that provides interesting facts about locations.' },
+            { role: 'user', content: `Tell me 3 interesting facts about this location: ${pickedLocation.display_name}` }
+          ]
+        })
+      });
+      const data = await response.json();
+      if (data.choices && data.choices[0]) {
+        setAiResponse(data.choices[0].message.content);
+      }
+    } catch (error) {
+      console.error('AI Error:', error);
+      setAiResponse('Failed to get AI response. Please check your API key.');
+    } finally {
+      setIsAiLoading(false);
     }
   };
 
@@ -214,6 +243,33 @@ const Sidebar: React.FC<SidebarProps> = ({ onLocationSelect, pickedLocation, isP
                         {parseFloat(pickedLocation.lat).toFixed(4)}, {parseFloat(pickedLocation.lon).toFixed(4)}
                       </span>
                     </div>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <button
+                      onClick={handleAskAi}
+                      disabled={isAiLoading}
+                      className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg text-xs font-semibold hover:opacity-90 transition-all disabled:opacity-50 shadow-md"
+                    >
+                      {isAiLoading ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-3 h-3" />
+                      )}
+                      Ask AI about this place
+                    </button>
+
+                    {aiResponse && (
+                      <div className="mt-3 p-3 bg-purple-50 border border-purple-100 rounded-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <div className="flex items-center gap-2 mb-2">
+                          <MessageSquare className="w-3 h-3 text-purple-600" />
+                          <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider">AI Insights</span>
+                        </div>
+                        <p className="text-[11px] text-gray-700 leading-relaxed whitespace-pre-wrap">
+                          {aiResponse}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
