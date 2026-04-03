@@ -85,19 +85,34 @@ export default function App() {
     fetchLocationDetails(lat, lon);
   };
 
-  const fetchBuildingFootprints = async (lat: number, lon: number, radius: number) => {
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371e3; // meters
+    const φ1 = lat1 * Math.PI/180;
+    const φ2 = lat2 * Math.PI/180;
+    const Δφ = (lat2-lat1) * Math.PI/180;
+    const Δλ = (lon2-lon1) * Math.PI/180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    return R * c;
+  };
+
+  const fetchBuildingFootprints = async (lat: number, lon: number, innerRadius: number, outerRadius: number) => {
     setIsFetchingBuildings(true);
     try {
       // Overpass API query for buildings and schools within a radius
       const query = `
         [out:json];
         (
-          way["building"](around:${radius},${lat},${lon});
-          relation["building"](around:${radius},${lat},${lon});
-          way["amenity"="school"](around:${radius},${lat},${lon});
-          relation["amenity"="school"](around:${radius},${lat},${lon});
-          way["school"](around:${radius},${lat},${lon});
-          relation["school"](around:${radius},${lat},${lon});
+          way["building"](around:${outerRadius},${lat},${lon});
+          relation["building"](around:${outerRadius},${lat},${lon});
+          way["amenity"="school"](around:${outerRadius},${lat},${lon});
+          relation["amenity"="school"](around:${outerRadius},${lat},${lon});
+          way["school"](around:${outerRadius},${lat},${lon});
+          relation["school"](around:${outerRadius},${lat},${lon});
         );
         out geom;
       `;
@@ -107,8 +122,39 @@ export default function App() {
       });
       const data = await response.json();
       
-      const footprints: BuildingFootprint[] = data.elements
-        .filter((el: any) => el.type === 'way' && el.geometry)
+      const allElements = data.elements
+        .filter((el: any) => (el.type === 'way' || el.type === 'relation') && el.geometry)
+        .map((el: any) => {
+          // Calculate distance from center to first point of geometry as an approximation
+          const firstPt = el.geometry[0];
+          const dist = calculateDistance(lat, lon, firstPt.lat, firstPt.lon);
+          
+          return {
+            id: el.id,
+            name: el.tags?.name || null,
+            distance_meters: dist,
+            building: el.tags?.building || null,
+            amenity: el.tags?.amenity || null,
+            military: el.tags?.military || null,
+            geometry: el.geometry
+          };
+        });
+
+      // Call OpenAI to filter buildings
+      const filterResponse = await fetch('/api/openai/filter-buildings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          buildings: allElements.map(({ geometry, ...rest }) => rest),
+          innerRadius: innerRadius
+        })
+      });
+      
+      const filterData = await filterResponse.json();
+      const civilianIds = new Set(filterData.civilian_buildings.map((b: any) => b.id));
+
+      const footprints: BuildingFootprint[] = allElements
+        .filter((el: any) => civilianIds.has(el.id))
         .map((el: any) => ({
           id: el.id,
           coordinates: [el.geometry.map((pt: any) => [pt.lon, pt.lat])],
@@ -116,7 +162,7 @@ export default function App() {
 
       setBuildingFootprints(footprints);
     } catch (error) {
-      console.error('Overpass API error:', error);
+      console.error('Building fetch/filter error:', error);
     } finally {
       setIsFetchingBuildings(false);
     }
@@ -132,8 +178,8 @@ export default function App() {
       };
       setCircleLayers([newLayer]);
       
-      // Fetch buildings for the new circle
-      fetchBuildingFootprints(pendingCircleLocation[1], pendingCircleLocation[0], outer);
+      // Fetch buildings for the new circle with AI filtering
+      fetchBuildingFootprints(pendingCircleLocation[1], pendingCircleLocation[0], inner, outer);
       
       setPendingCircleLocation(null);
     }

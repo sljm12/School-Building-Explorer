@@ -48,6 +48,70 @@ async function startServer() {
     }
   });
 
+  app.post("/api/openai/filter-buildings", async (req, res) => {
+    try {
+      const { buildings, innerRadius } = req.body;
+      const client = getOpenAI();
+      
+      const prompt = `
+Given a list of OSM buildings, perform the following:
+
+STEP 1 — Filter by distance:
+Keep only buildings where distance_meters <= ${innerRadius}m.
+
+STEP 2 — Identify confirmed civilian buildings:
+From the Step 1 filtered list, keep only buildings where at least one 
+of the following applies:
+  - amenity is a recognised civilian type (e.g. place_of_worship, school)
+  - building is a recognised civilian type (e.g. residential, college, 
+    construction, retail)
+  - name clearly indicates a civilian purpose
+
+Discard a building if ANY of the following are true:
+- building = "yes" AND amenity is null AND name is null
+- military field is not null
+- No field provides a specific, recognisable civilian indicator
+
+Treat all discarded buildings as military or ambiguous
+
+STEP 3 — Decision and Output:
+Populate the civilian_buildings array with all buildings that 
+satisfy BOTH Step 1 and Step 2.
+{  "civilian_buildings": [
+    {
+      "id": <integer>,
+      "name": <string or null>,
+      "distance_meters": <float>,
+      "building": <string or null>,
+      "amenity": <string or null>,
+ 
+    }
+  ]
+}
+
+List of buildings:
+${JSON.stringify(buildings, null, 2)}
+`;
+
+      const response = await client.chat.completions.create({
+        model: process.env.OPENAI_MODEL || "gpt-4o",
+        messages: [
+          { role: "system", content: "You are a specialized geospatial data analyst. Return ONLY valid JSON." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" }
+      });
+
+      const content = response.choices[0].message.content;
+      if (!content) throw new Error("Empty response from OpenAI");
+      
+      res.json(JSON.parse(content));
+    } catch (error: any) {
+      console.error("OpenAI Filter Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
