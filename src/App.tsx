@@ -20,7 +20,7 @@ export interface CircleLayer {
 }
 
 export interface BuildingFootprint {
-  id: number;
+  id: string;
   coordinates: [number, number][][]; // Array of rings, each ring is an array of [lon, lat]
 }
 
@@ -103,42 +103,19 @@ export default function App() {
   const fetchBuildingFootprints = async (lat: number, lon: number, innerRadius: number, outerRadius: number) => {
     setIsFetchingBuildings(true);
     try {
-      // Overpass API query for buildings and schools within a radius
-      const query = `
-        [out:json];
-        (
-          way["building"](around:${outerRadius},${lat},${lon});
-          relation["building"](around:${outerRadius},${lat},${lon});
-          way["amenity"="school"](around:${outerRadius},${lat},${lon});
-          relation["amenity"="school"](around:${outerRadius},${lat},${lon});
-          way["school"](around:${outerRadius},${lat},${lon});
-          relation["school"](around:${outerRadius},${lat},${lon});
-        );
-        out geom;
-      `;
-      const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        body: query,
-      });
-      const data = await response.json();
+      // Use our new PostGIS endpoint
+      const response = await fetch(`/api/buildings/nearby?lat=${lat}&lon=${lon}&radius=${outerRadius}`);
+      const buildings = await response.json();
       
-      const allElements = data.elements
-        .filter((el: any) => (el.type === 'way' || el.type === 'relation') && el.geometry)
-        .map((el: any) => {
-          // Calculate distance from center to first point of geometry as an approximation
-          const firstPt = el.geometry[0];
-          const dist = calculateDistance(lat, lon, firstPt.lat, firstPt.lon);
-          
-          return {
-            id: el.id,
-            name: el.tags?.name || null,
-            distance_meters: dist,
-            building: el.tags?.building || null,
-            amenity: el.tags?.amenity || null,
-            military: el.tags?.military || null,
-            geometry: el.geometry
-          };
-        });
+      const allElements = buildings.map((el: any) => ({
+        id: el.osm_id,
+        name: el.name,
+        distance_meters: el.distance_meters,
+        building: el.building,
+        amenity: el.amenity,
+        military: el.military,
+        geometry: el.geometry
+      }));
 
       // Call OpenAI to filter buildings
       const filterResponse = await fetch('/api/openai/filter-buildings', {
@@ -151,14 +128,27 @@ export default function App() {
       });
       
       const filterData = await filterResponse.json();
-      const civilianIds = new Set(filterData.civilian_buildings.map((b: any) => b.id));
+      const civilianIds = new Set(filterData.civilian_buildings.map((b: any) => String(b.id)));
 
       const footprints: BuildingFootprint[] = allElements
-        .filter((el: any) => civilianIds.has(el.id))
-        .map((el: any) => ({
-          id: el.id,
-          coordinates: [el.geometry.map((pt: any) => [pt.lon, pt.lat])],
-        }));
+        .filter((el: any) => civilianIds.has(String(el.id)))
+        .map((el: any) => {
+          let coordinates: [number, number][][] = [];
+          if (el.geometry.type === 'Polygon') {
+            coordinates = el.geometry.coordinates;
+          } else if (el.geometry.type === 'MultiPolygon') {
+            // A MultiPolygon is an array of Polygons. 
+            // We'll flatten them into one for rendering if possible, 
+            // or just take the first one's rings if they are separate parts.
+            // OpenLayers Polygon geometry expects [ring, ring, ...]
+            coordinates = el.geometry.coordinates.flat(1);
+          }
+
+          return {
+            id: String(el.id),
+            coordinates: coordinates,
+          };
+        });
 
       setBuildingFootprints(footprints);
     } catch (error) {

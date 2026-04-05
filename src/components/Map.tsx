@@ -20,7 +20,7 @@ interface CircleLayerData {
 }
 
 interface BuildingFootprintData {
-  id: number;
+  id: string;
   coordinates: [number, number][][];
 }
 

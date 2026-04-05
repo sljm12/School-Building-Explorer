@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import { getBuildingsNearby } from "./src/lib/postgis.js";
 
 dotenv.config();
 
@@ -102,7 +103,10 @@ ${JSON.stringify(buildings, null, 2)}
         response_format: { type: "json_object" }
       });
 
+      console.log("OpenAI Filter Prompt:", prompt);
+
       const content = response.choices[0].message.content;
+      console.log("OpenAI Filter Response:", content);
       if (!content) throw new Error("Empty response from OpenAI");
       
       res.json(JSON.parse(content));
@@ -114,6 +118,25 @@ ${JSON.stringify(buildings, null, 2)}
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  app.get("/api/buildings/nearby", async (req, res) => {
+    try {
+      const lat = parseFloat(req.query.lat as string);
+      const lon = parseFloat(req.query.lon as string);
+      const radius = parseFloat(req.query.radius as string);
+
+      if (isNaN(lat) || isNaN(lon) || isNaN(radius)) {
+        res.status(400).json({ error: "Invalid lat, lon, or radius parameters." });
+        return;
+      }
+
+      const buildings = await getBuildingsNearby(lon, lat, radius);
+      res.json(buildings);
+    } catch (error: any) {
+      console.error("PostGIS Error:", error);
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Vite middleware for development
