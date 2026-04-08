@@ -9,7 +9,7 @@ import MapComponent from './components/Map';
 import Toolbar from './components/Toolbar';
 import RadiusDialog from './components/RadiusDialog';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, AlertCircle, CheckCircle2, X } from 'lucide-react';
 import { cn } from './lib/utils';
 
 export interface CircleLayer {
@@ -43,6 +43,10 @@ export default function App() {
   const [circleLayers, setCircleLayers] = useState<CircleLayer[]>([]);
   const [buildingFootprints, setBuildingFootprints] = useState<BuildingFootprint[]>([]);
   const [isFetchingBuildings, setIsFetchingBuildings] = useState(false);
+  const [fetchStatus, setFetchStatus] = useState<{
+    step: string;
+    error: string | null;
+  }>({ step: '', error: null });
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const handleLocationSelect = (lat: number, lon: number) => {
@@ -102,11 +106,15 @@ export default function App() {
 
   const fetchBuildingFootprints = async (lat: number, lon: number, innerRadius: number, outerRadius: number) => {
     setIsFetchingBuildings(true);
+    setFetchStatus({ step: 'Searching PostGIS for buildings...', error: null });
     try {
       // Use our new PostGIS endpoint
       const response = await fetch(`/api/buildings/nearby?lat=${lat}&lon=${lon}&radius=${outerRadius}`);
+      if (!response.ok) throw new Error('Failed to fetch buildings from PostGIS');
       const buildings = await response.json();
       
+      setFetchStatus({ step: `Analyzing ${buildings.length} buildings with AI...`, error: null });
+
       const allElements = buildings.map((el: any) => ({
         id: el.osm_id,
         name: el.name,
@@ -127,7 +135,11 @@ export default function App() {
         })
       });
       
+      if (!filterResponse.ok) throw new Error('AI filtering request failed');
       const filterData = await filterResponse.json();
+      
+      setFetchStatus({ step: 'Processing results and updating map...', error: null });
+      
       const civilianIds = new Set(filterData.civilian_buildings.map((b: any) => String(b.id)));
 
       const footprints: BuildingFootprint[] = allElements
@@ -137,10 +149,6 @@ export default function App() {
           if (el.geometry.type === 'Polygon') {
             coordinates = el.geometry.coordinates;
           } else if (el.geometry.type === 'MultiPolygon') {
-            // A MultiPolygon is an array of Polygons. 
-            // We'll flatten them into one for rendering if possible, 
-            // or just take the first one's rings if they are separate parts.
-            // OpenLayers Polygon geometry expects [ring, ring, ...]
             coordinates = el.geometry.coordinates.flat(1);
           }
 
@@ -151,8 +159,13 @@ export default function App() {
         });
 
       setBuildingFootprints(footprints);
-    } catch (error) {
+      setFetchStatus({ step: 'Done!', error: null });
+      
+      // Clear status after a short delay
+      setTimeout(() => setFetchStatus({ step: '', error: null }), 3000);
+    } catch (error: any) {
       console.error('Building fetch/filter error:', error);
+      setFetchStatus({ step: '', error: error.message || 'An unknown error occurred' });
     } finally {
       setIsFetchingBuildings(false);
     }
@@ -242,6 +255,61 @@ export default function App() {
           onClose={() => setShowRadiusDialog(false)}
           onConfirm={handleAddCircles}
         />
+
+        {/* Processing Status Panel */}
+        <AnimatePresence>
+          {(fetchStatus.step || fetchStatus.error) && (
+            <motion.div
+              initial={{ opacity: 0, y: 20, x: '-50%' }}
+              animate={{ opacity: 1, y: 0, x: '-50%' }}
+              exit={{ opacity: 0, y: 20, x: '-50%' }}
+              className="absolute bottom-20 left-1/2 z-50 min-w-[300px]"
+            >
+              <div className={cn(
+                "bg-white rounded-xl shadow-2xl border p-4 flex items-center gap-4 transition-colors",
+                fetchStatus.error ? "border-red-200 bg-red-50" : "border-blue-100"
+              )}>
+                {fetchStatus.error ? (
+                  <div className="bg-red-100 p-2 rounded-full">
+                    <AlertCircle className="w-5 h-5 text-red-600" />
+                  </div>
+                ) : fetchStatus.step === 'Done!' ? (
+                  <div className="bg-green-100 p-2 rounded-full">
+                    <CheckCircle2 className="w-5 h-5 text-green-600" />
+                  </div>
+                ) : (
+                  <div className="bg-blue-100 p-2 rounded-full">
+                    <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                  </div>
+                )}
+                
+                <div className="flex-1">
+                  <p className={cn(
+                    "text-sm font-medium",
+                    fetchStatus.error ? "text-red-900" : "text-gray-900"
+                  )}>
+                    {fetchStatus.error ? "Error Occurred" : "Processing Status"}
+                  </p>
+                  <p className={cn(
+                    "text-xs",
+                    fetchStatus.error ? "text-red-700" : "text-gray-500"
+                  )}>
+                    {fetchStatus.error || fetchStatus.step}
+                  </p>
+                </div>
+
+                {fetchStatus.error && (
+                  <button 
+                    onClick={() => setFetchStatus({ step: '', error: null })}
+                    className="p-1 hover:bg-red-100 rounded-full transition-colors"
+                  >
+                    <X className="w-4 h-4 text-red-500" />
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
         
         {/* Floating Overlay for Coordinates */}
         <div className="absolute bottom-6 right-6 bg-white/90 backdrop-blur-sm px-4 py-2 rounded-full shadow-lg border border-gray-100 text-[10px] font-mono text-gray-500 z-20">
